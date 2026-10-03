@@ -27,6 +27,7 @@ try:
     from svgelements import (
         SVG, Group, Circle as SvCircle, Rect as SvRect,
         Path as SvPath, Polyline, Polygon,
+        Text as SvText,
         Line, Close, Move, Matrix,
     )
 except ImportError:
@@ -35,7 +36,7 @@ except ImportError:
     sys.exit(2)
 
 
-VERSION = "1.0-mvp"
+VERSION = "1.0.0"
 
 DRILL_TOL_MM = 0.1
 RADIUS_TOL_MM = 0.001
@@ -372,6 +373,28 @@ def find_layers(svg):
     return result
 
 
+def warn_about_text(svg):
+    """Ищем элементы <text> и предупреждаем, что они не будут сконвертированы."""
+    found = []
+    for el in svg.elements():
+        if isinstance(el, SvText):
+            found.append(el_id(el))
+
+    if not found:
+        return
+
+    sample = ", ".join(found[:5])
+    if len(found) > 5:
+        sample += f" ... (всего {len(found)})"
+
+    LOG.warn(
+        None, sample,
+        f"найдено {len(found)} элементов <text> — они не будут сконвертированы",
+        hint=("в Inkscape выделите текст и выполните Path → Object to Path\n"
+              "           (Ctrl+Shift+C), затем запустите скрипт снова")
+    )
+
+
 # ============================================================================
 # МОДЕЛЬ
 # ============================================================================
@@ -597,8 +620,8 @@ def _classify_sandwich(shapes, group_el, dpi):
             if drill is not None:
                 LOG.error(L_THT, gid,
                           "больше одного чёрного элемента (drill) "
-                          "в бутерброде",
-                          hint="один бутерброд = один drill")
+                          "в группе",
+                          hint="одна группа = один drill")
                 return None
             g = _to_geom(shape, m, dpi)
             if not g:
@@ -633,8 +656,8 @@ def _classify_sandwich(shapes, group_el, dpi):
             if pad is not None:
                 LOG.error(L_THT, gid,
                           "больше одного цветного circle/rect (pad) "
-                          "в бутерброде",
-                          hint="один бутерброд = один pad")
+                          "в группе",
+                          hint="одна группа = один pad")
                 return None
             g = _to_geom(shape, m, dpi)
             if not g:
@@ -691,8 +714,8 @@ def _classify_sandwich(shapes, group_el, dpi):
                 'net_label': None}
 
     LOG.error(L_THT, gid,
-              "в бутерброде нет ни pad (цветного), ни drill (чёрного)",
-              hint="THT-группа должна содержать хотя бы одно из двух")
+              "в группе нет ни pad (цветного), ни drill (чёрного)",
+              hint="группа THT должна содержать хотя бы одно из двух")
     return None
 
 
@@ -726,8 +749,8 @@ def find_sandwiches(el):
         if groups:
             LOG.error(L_THT, el_id(el),
                       "на одном уровне смешаны группы и фигуры",
-                      hint="бутерброд = группа только с фигурами; "
-                           "контейнер = группа только с группами")
+                      hint="группа только с фигурами = один THT-пад; "
+                           "контейнер = группа только с вложенными группами")
             return []
         return [el]
 
@@ -941,6 +964,7 @@ def match_vias(model):
                       f"(x={b['x']:.3f} y={b['y']:.3f})",
                       hint="создайте симметричный круг на слое F.Pad")
 
+
 # ============================================================================
 # ПРОВЕРКА SMD-OVER-DRILL
 # ============================================================================
@@ -1073,7 +1097,8 @@ def check_smd_over_drill(model, allow_via_in_pad=False):
 
             _emit_smd_over_drill_error(p, d)
             break
-            
+
+
 # ============================================================================
 # СМЕЩЕНИЕ
 # ============================================================================
@@ -1389,6 +1414,10 @@ svg2kicad — конвертер Inkscape SVG в KiCad .kicad_pcb.
   Без метки — имя из цвета. Конфликт метки и цвета → ERROR.
   SMD-пад на B.Cu связывается с цепью на F.Cu через via того же цвета.
 
+ТЕКСТ:
+  Элементы <text> не поддерживаются. В Inkscape выделите текст и
+  выполните Path → Object to Path (Ctrl+Shift+C) перед конвертацией.
+
 ОПЦИИ:
   --dpi N         Масштаб (по умолчанию 96 = классические 96 px/inch).
                   Больше --dpi → меньше плата.
@@ -1397,7 +1426,6 @@ svg2kicad — конвертер Inkscape SVG в KiCad .kicad_pcb.
                   По умолчанию такое наложение = ERROR, потому что паста
                   затечёт в отверстие при оплавлении. Для THT и NPTH
                   это разрешение не действует.
-  --font PATH     Шрифт TTF (для <text>, MVP: не поддерживается).
   --check-only    Только валидация, файл не пишется.
   --log FILE      Дублировать вывод в файл.
   --debug         Печатать разбор каждой фигуры.
@@ -1443,6 +1471,10 @@ NET NAMES:
   Otherwise — derived from color. Color/label conflict → ERROR.
   SMD pads on B.Cu join the F.Cu net of the same color through a via.
 
+TEXT:
+  <text> elements are not supported. In Inkscape select the text and
+  run Path → Object to Path (Ctrl+Shift+C) before conversion.
+
 OPTIONS:
   --dpi N         Scale (default 96 = classic 96 px/inch).
                   Higher --dpi → smaller board.
@@ -1451,7 +1483,6 @@ OPTIONS:
                   By default such an overlap is an ERROR: the solder paste
                   will wick into the hole during reflow. This does NOT
                   apply to THT or NPTH holes.
-  --font PATH     TTF font path (for <text>; MVP: not supported).
   --check-only    Validate only, no output file.
   --log FILE      Also write output to file.
   --debug         Verbose per-shape debug.
@@ -1480,7 +1511,6 @@ def parse_args():
     ap.add_argument('input')
     ap.add_argument('output')
     ap.add_argument('--dpi', type=float, default=96.0)
-    ap.add_argument('--font', type=str, default=None)
     ap.add_argument('--check-only', action='store_true')
     ap.add_argument('--log', type=str, default=None)
     ap.add_argument('--debug', action='store_true')
@@ -1541,6 +1571,9 @@ def main():
                  hint="обновите библиотеку: pip install -U svgelements")
     except Exception as e:
         LOG.warn(None, None, f"reify() не сработал: {e}")
+
+    # Проверка на наличие <text> (не поддерживается)
+    warn_about_text(svg)
 
     LOG.step(3, total_steps, "Поиск слоёв")
     layers = find_layers(svg)
