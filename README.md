@@ -26,7 +26,7 @@ python svg2kicad.py input.svg output.kicad_pcb
 
 Скрипт читает обычный Inkscape-файл, где объекты разложены по слоям с
 заданными именами, и генерирует `.kicad_pcb`, который открывается в KiCad 8+
-и трассируется в FreeRouting без ручной доводки.
+и трассируется в FreeRouting.
 
 ---
 
