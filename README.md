@@ -5,6 +5,13 @@
 
 **Inkscape SVG → KiCad `.kicad_pcb` converter for artists, makers, and small DIY projects.**
 
+```bash
+git clone https://github.com/vasiliypavlov/svg2kicad
+cd svg2kicad
+pip install -r requirements.txt
+python svg2kicad.py input.svg output.kicad_pcb
+```
+
 [Русский](#русский) | [English](#english)
 
 ---
