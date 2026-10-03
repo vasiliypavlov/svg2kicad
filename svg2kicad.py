@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-svg2kicad.py — Inkscape SVG → KiCad .kicad_pcb converter (MVP).
+svg2kicad.py — Inkscape SVG → KiCad .kicad_pcb converter.
 
 Слои SVG (inkscape:label):
   THT       — группы сквозных падов THT: drill (чёрный) + pad (цветной) + silk (белый)
@@ -36,7 +36,7 @@ except ImportError:
     sys.exit(2)
 
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 DRILL_TOL_MM = 0.1
 RADIUS_TOL_MM = 0.001
@@ -61,6 +61,9 @@ INK_LABEL = "{http://www.inkscape.org/namespaces/inkscape}label"
 
 C_BLACK = "#000000"
 C_WHITE = "#ffffff"
+
+VIA_MODE_PAD = "pad"   # via как THT-пад (работает с плагином FreeRouting KiCad 10)
+VIA_MODE_VIA = "via"   # канонический (via ...) — для standalone FreeRouting
 
 CSS_NAMED = {
     'black': '#000000', 'white': '#ffffff', 'red': '#ff0000',
@@ -401,7 +404,7 @@ def warn_about_text(svg):
 
 class Model:
     def __init__(self):
-        self.pads = []       # каждый dict содержит 'side': 'F' | 'B' | 'THT'
+        self.pads = []
         self.vias = []
         self.npths = []
         self.zones = []
@@ -970,7 +973,6 @@ def match_vias(model):
 # ============================================================================
 
 def _bbox_pad(p):
-    """Bounding box пада (x0, y0, x1, y1). Без поворотов — у нас их нет."""
     if p['kind'] == 'circle':
         r = p['size_x'] / 2
         return (p['x']-r, p['y']-r, p['x']+r, p['y']+r)
@@ -1033,15 +1035,6 @@ def _emit_smd_over_drill_error(p, d):
 
 
 def check_smd_over_drill(model, allow_via_in_pad=False):
-    """ERROR если SMD-пад пересекается с drill любого отверстия.
-
-    Источники drill:
-      - THT-пады      (drill_geom внутри пада)
-      - vias          (отверстие via)
-      - NPTH          (монтажные/крепежные отверстия)
-
-    Исключение: SMD поверх via разрешается флагом --allow-via-in-pad.
-    """
     drills = []
 
     for p in model.pads:
@@ -1073,7 +1066,6 @@ def check_smd_over_drill(model, allow_via_in_pad=False):
         return
 
     for p in model.pads:
-        # THT-пады исключаем: у них нет пасты, это не SMD.
         if p.get('drill_geom') is not None:
             continue
 
@@ -1131,7 +1123,6 @@ def _write_pad(w, p, name):
     side = p.get('side', 'F')
 
     if drill_geom is None:
-        # SMD: layers зависят от стороны
         ptype = 'smd'
         drill_str = ''
         if side == 'B':
@@ -1172,7 +1163,7 @@ def _write_footprint_header(w, name, layer, ref):
       f'(uuid "{uuid.uuid4()}") (effects (font (size 1 1) (thickness 0.15))))')
 
 
-def write_kicad_pcb(model, path, gnd_pour_pts=None):
+def write_kicad_pcb(model, path, gnd_pour_pts=None, via_mode=VIA_MODE_PAD):
     out = []
     w = out.append
 
@@ -1228,24 +1219,32 @@ def write_kicad_pcb(model, path, gnd_pour_pts=None):
     pads_f = [p for p in model.pads if p.get('side') in ('F', 'THT')]
     pads_b = [p for p in model.pads if p.get('side') == 'B']
 
+    # Счётчик Reference — чтобы не было дублей между футпринтами.
+    ref_counter = 1
+
     # --- Footprint F (включая все THT) ---
     if pads_f:
-        _write_footprint_header(w, "svg:converted-F", "F.Cu", "#PWR01")
+        _write_footprint_header(w, "svg:converted-F", "F.Cu",
+                                f"#PWR{ref_counter:02d}")
+        ref_counter += 1
         for i, p in enumerate(pads_f):
             _write_pad(w, p, str(i + 1))
         w('\t)')
 
     # --- Footprint B (только SMD B.Cu) ---
     if pads_b:
-        _write_footprint_header(w, "svg:converted-B", "B.Cu", "#PWR02")
+        _write_footprint_header(w, "svg:converted-B", "B.Cu",
+                                f"#PWR{ref_counter:02d}")
+        ref_counter += 1
         for i, p in enumerate(pads_b):
             _write_pad(w, p, str(i + 1))
         w('\t)')
 
     # --- NPTH ---
     if model.npths:
-        ref_idx = 3 if pads_b else 2
-        _write_footprint_header(w, "svg:holes", "F.Cu", f"#PWR{ref_idx:02d}")
+        _write_footprint_header(w, "svg:holes", "F.Cu",
+                                f"#PWR{ref_counter:02d}")
+        ref_counter += 1
         for n in model.npths:
             if n.get('kind') == 'oval':
                 ww, hh = n['w'], n['h']
@@ -1261,12 +1260,35 @@ def write_kicad_pcb(model, path, gnd_pour_pts=None):
         w('\t)')
 
     # --- Vias ---
-    for v in model.vias:
-        w(f'\t(via (at {fmt(v["x"])} {fmt(v["y"])}) '
-          f'(size {fmt(v["pad_dia"])}) (drill {fmt(v["drill_dia"])}) '
-          f'(layers "F.Cu" "B.Cu") '
-          f'(net {v.get("net_num", 0)}) '
-          f'(uuid "{uuid.uuid4()}"))')
+    if model.vias:
+        if via_mode == VIA_MODE_PAD:
+            # Обходной путь: via как THT-пад в отдельном футпринте.
+            # Плагин FreeRouting (KiCad 10) падает на pre-placed via.
+            # THT-пад без открытия маски функционально идентичен via,
+            # но воспринимается плагином как обычный pin.
+            _write_footprint_header(w, "svg:vias", "F.Cu",
+                                    f"#PWR{ref_counter:02d}")
+            ref_counter += 1
+            for i, v in enumerate(model.vias):
+                name = f"V{i + 1}"
+                net_num = v.get("net_num", 0)
+                net_name = v.get("net_name", "")
+                w(f'\t\t(pad "{name}" thru_hole circle '
+                  f'(at {fmt(v["x"])} {fmt(v["y"])}) '
+                  f'(size {fmt(v["pad_dia"])} {fmt(v["pad_dia"])}) '
+                  f'(drill {fmt(v["drill_dia"])}) '
+                  f'(layers "*.Cu" "*.Mask") '
+                  f'(net {net_num} "{net_name}") '
+                  f'(uuid "{uuid.uuid4()}"))')
+            w('\t)')
+        else:
+            # Канонический режим: (via ...) — для standalone FreeRouting.
+            for v in model.vias:
+                w(f'\t(via (at {fmt(v["x"])} {fmt(v["y"])}) '
+                  f'(size {fmt(v["pad_dia"])}) (drill {fmt(v["drill_dia"])}) '
+                  f'(layers "F.Cu" "B.Cu") '
+                  f'(net {v.get("net_num", 0)}) '
+                  f'(uuid "{uuid.uuid4()}"))')
 
     # --- Rule Area ---
     for z in model.zones:
@@ -1421,11 +1443,25 @@ svg2kicad — конвертер Inkscape SVG в KiCad .kicad_pcb.
 ОПЦИИ:
   --dpi N         Масштаб (по умолчанию 96 = классические 96 px/inch).
                   Больше --dpi → меньше плата.
+
+  --via-mode MODE Режим вывода переходных отверстий (via):
+                    pad (по умолчанию) — via как THT-пад в отдельном
+                        футпринте. Работает с плагином FreeRouting
+                        (KiCad 10), у которого краш на pre-placed via.
+                        Функционально идентично настоящей via:
+                        медь на F.Cu и B.Cu + металлизированное отверстие.
+                    via — канонический объект (via ...). Для standalone
+                        FreeRouting, который корректно обрабатывает
+                        pre-placed via. Плагин KiCad 10 на этом режиме
+                        падает — используйте только при работе через
+                        standalone-версию.
+
   --allow-via-in-pad
                   Разрешить наложение SMD-пада на via (via-in-pad).
                   По умолчанию такое наложение = ERROR, потому что паста
                   затечёт в отверстие при оплавлении. Для THT и NPTH
                   это разрешение не действует.
+
   --check-only    Только валидация, файл не пишется.
   --log FILE      Дублировать вывод в файл.
   --debug         Печатать разбор каждой фигуры.
@@ -1478,11 +1514,24 @@ TEXT:
 OPTIONS:
   --dpi N         Scale (default 96 = classic 96 px/inch).
                   Higher --dpi → smaller board.
+
+  --via-mode MODE Vias output mode:
+                    pad (default) — vias as THT pads in a separate
+                        footprint. Works with the FreeRouting plugin
+                        (KiCad 10), which crashes on pre-placed vias.
+                        Functionally identical to a real via:
+                        copper on F.Cu and B.Cu + plated hole.
+                    via — canonical (via ...) object. For standalone
+                        FreeRouting which handles pre-placed vias
+                        correctly. The KiCad 10 plugin will crash on
+                        this mode — use only with standalone FreeRouting.
+
   --allow-via-in-pad
                   Allow SMD pad to overlap a via (via-in-pad).
                   By default such an overlap is an ERROR: the solder paste
                   will wick into the hole during reflow. This does NOT
                   apply to THT or NPTH holes.
+
   --check-only    Validate only, no output file.
   --log FILE      Also write output to file.
   --debug         Verbose per-shape debug.
@@ -1511,6 +1560,10 @@ def parse_args():
     ap.add_argument('input')
     ap.add_argument('output')
     ap.add_argument('--dpi', type=float, default=96.0)
+    ap.add_argument('--via-mode', choices=[VIA_MODE_PAD, VIA_MODE_VIA],
+                    default=VIA_MODE_PAD,
+                    help='pad (default) — via как THT-пад; '
+                         'via — канонический (via ...) для standalone FreeRouting')
     ap.add_argument('--check-only', action='store_true')
     ap.add_argument('--log', type=str, default=None)
     ap.add_argument('--debug', action='store_true')
@@ -1544,6 +1597,7 @@ def main():
     LOG.info(f"input      = {args.input}")
     LOG.info(f"output     = {args.output}")
     LOG.info(f"dpi        = {dpi} ({px_to_mm:.6f} мм на user unit)")
+    LOG.info(f"via-mode   = {args.via_mode}")
     LOG.info(f"check-only = {args.check_only}")
 
     LOG.step(2, total_steps, "Загрузка SVG")
@@ -1572,7 +1626,6 @@ def main():
     except Exception as e:
         LOG.warn(None, None, f"reify() не сработал: {e}")
 
-    # Проверка на наличие <text> (не поддерживается)
     warn_about_text(svg)
 
     LOG.step(3, total_steps, "Поиск слоёв")
@@ -1701,7 +1754,6 @@ def main():
         model.silk_b += parse_silk(layers[L_BSILK], dpi, L_BSILK, 'B')
         LOG.info(f"B.SilkS: {len(model.silk_b) - n_before} объектов")
 
-    # Сводка по падам
     n_f = sum(1 for p in model.pads if p.get('side') == 'F')
     n_b = sum(1 for p in model.pads if p.get('side') == 'B')
     n_t = sum(1 for p in model.pads if p.get('side') == 'THT')
@@ -1751,7 +1803,8 @@ def main():
         LOG.info("check-only: файл не пишется")
     else:
         try:
-            write_kicad_pcb(model, args.output, gnd_pour_pts)
+            write_kicad_pcb(model, args.output, gnd_pour_pts,
+                            via_mode=args.via_mode)
             LOG.info(f"Файл записан: {args.output}")
         except Exception as e:
             LOG.error(None, None, f"ошибка записи: {e}")
