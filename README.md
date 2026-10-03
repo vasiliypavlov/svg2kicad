@@ -1,5 +1,6 @@
-# README.md
+# Обновлённый `README.md`
 
+Полная версия с добавлением `--via-mode`, описанием двух режимов работы via и разделом про известные проблемы с плагином FreeRouting.
 
 # svg2kicad
 
@@ -51,6 +52,7 @@ python svg2kicad.py input.svg output.kicad_pcb
 - [Опции командной строки](#опции-командной-строки)
 - [Примеры](#примеры)
 - [Ограничения](#ограничения)
+- [Известные проблемы](#известные-проблемы-ru)
 - [FAQ](#faq-ru)
 - [Лицензия](#лицензия)
 - [Благодарности](#благодарности)
@@ -232,6 +234,16 @@ Label**. Метка вида `NetVCC`, `NetAnode`, `NetGND` даст цепи с
 </g>
 ```
 
+**Как via попадает в `.kicad_pcb`.** Есть два режима вывода, переключаемые
+флагом `--via-mode`:
+
+| Режим | Что пишется в файл | Совместимость |
+|---|---|---|
+| `pad` (по умолчанию) | via как **THT-пад** в отдельном футпринте `svg:vias` | Плагин FreeRouting (KiCad 10) |
+| `via` | канонический объект `(via ...)` | Только standalone FreeRouting |
+
+Подробности — в разделе [Известные проблемы](#известные-проблемы-ru).
+
 ### Контур платы
 
 Слой `Edge.Cuts`. Все замкнутые фигуры (path, rect, circle) превращаются
@@ -274,14 +286,17 @@ Label**. Метка вида `NetVCC`, `NetAnode`, `NetGND` даст цепи с
 
 ## Что получается на выходе
 
-Файл `.kicad_pcb` (версия формата `20231120`, совместим с KiCad 8 и 9+).
+Файл `.kicad_pcb` (версия формата `20231120`, совместим с KiCad 8+).
 
 Содержимое:
 
 - **Один или два footprint'а** со всеми падами:
   - `svg:converted-F` — пады F.Cu и THT;
   - `svg:converted-B` — пады B.Cu (только если они есть).
-- **Vias** — как самостоятельные объекты.
+- **Vias**:
+  - в режиме `--via-mode pad` — как THT-пады в отдельном футпринте
+    `svg:vias`;
+  - в режиме `--via-mode via` — как самостоятельные объекты `(via ...)`.
 - **NPTH** — как отдельный footprint `svg:holes`.
 - **Зоны запрета** — на F.Cu и/или B.Cu.
 - **Шелкография** — `gr_line`, `gr_rect`, `gr_circle`, `gr_poly`.
@@ -369,6 +384,16 @@ python svg2kicad.py input.svg output.kicad_pcb [опции]
         Масштаб. По умолчанию 96 (классические 96 px/inch).
         Больше значение → меньше плата.
 
+  --via-mode MODE
+        Режим вывода переходных отверстий:
+          pad (по умолчанию) — via как THT-пад в отдельном футпринте
+              svg:vias. Работает с плагином FreeRouting (KiCad 10),
+              у которого краш на pre-placed via. Функционально
+              идентично настоящей via.
+          via — канонический объект (via ...). Для standalone
+              FreeRouting, который корректно обрабатывает pre-placed
+              via. Плагин KiCad 10 в этом режиме падает.
+
   --allow-via-in-pad
         Разрешить наложение SMD-пада на via (via-in-pad).
         По умолчанию такое наложение = ERROR, потому что паста затечёт
@@ -416,7 +441,7 @@ python svg2kicad.py input.svg output.kicad_pcb [опции]
 - Работать с форматами кроме Inkscape SVG (Illustrator, Corel, DXF,
   HPGL и т. п.).
 - Размещать компоненты с Reference Designator'ами (`R1`, `U1` и т. п.).
-  Все пады попадают в один виртуальный footprint `#PWR01` (или `#PWR02`).
+  Все пады попадают в виртуальные футпринты `#PWR01`, `#PWR02` и т. д.
   Реальные позиционные обозначения ставьте после импорта в KiCad.
 - Поддерживать 4+ слоя меди.
 - Размещать BGA, via-in-pad (кроме как через флаг), слепые/скрытые via.
@@ -424,6 +449,88 @@ python svg2kicad.py input.svg output.kicad_pcb [опции]
 - Импортировать текст как `<text>` — только `Path → Object to Path`.
 
 Эти ограничения — сознательный выбор для простоты и надёжности.
+
+---
+
+<a name="известные-проблемы-ru"></a>
+## Известные проблемы
+
+### Плагин FreeRouting в KiCad 10 падает на pre-placed via
+
+**Симптом:** при запуске плагина **FreeRouting** (встроенного в KiCad 10)
+трассировка падает с ошибкой, если в `.kicad_pcb` есть хотя бы один объект
+`(via ...)`. Размер, положение и слой via значения не имеют — падает на
+любой.
+
+**Причина:** баг плагина. KiCad 10 выгружает pre-placed via в секцию
+`wiring` файла `.dsn`, и FreeRouting не может её обработать. Удаление via
+из `.kicad_pcb` полностью устраняет краш.
+
+**Решение:** скрипт по умолчанию (`--via-mode pad`) записывает via как
+**THT-пад без открытия маски** в отдельном футпринте `svg:vias`.
+Функционально это идентично настоящей via: медь на F.Cu и B.Cu плюс
+металлизированное отверстие, соединяющее слои. Плагин видит это как
+обычный pin и трассирует нормально.
+
+**Как получить «настоящие» via:** используйте флаг
+`--via-mode via` — скрипт запишет канонические объекты `(via ...)`.
+Это подходит для **standalone-версии FreeRouting** (Java-приложение,
+работает с `.dsn` напрямую). Плагин KiCad 10 на этом режиме упадёт.
+
+**Как это выглядит в KiCad:** в режиме `pad` via отображается как
+маленький круглый пад с номером `V1`, `V2`, и т. д. В режиме `via` —
+как стандартный значок via. На производство это не влияет.
+
+### Keepout-зоны и FreeRouting
+
+FreeRouting корректно учитывает keepout-зону только когда она объявлена
+на **обоих** медных слоях. Скрипт добавляет зону как в секцию F.Cu,
+так и в B.Cu автоматически — специально ничего делать не нужно.
+
+Если после экспорта DSN из KiCad зона не сработала — проверьте, что в
+файле `.dsn` есть две строки `(keepout "" (polygon F.Cu ...))` и
+`(keepout "" (polygon B.Cu ...))`.
+
+---
+
+<a name="faq-ru"></a>
+## FAQ
+
+**Q: Моя буква «A» отображается в KiCad как сплошной треугольник, а не буква.**
+A: Проверьте, что текст конвертирован в path (**Path → Object to Path**).
+Также убедитесь, что цвет ровно `#FFFFFF` — если это `#f9f9f9`, скрипт
+сочтёт это цветным pad'ом.
+
+**Q: Плата получилась слишком большой.**
+A: Увеличьте `--dpi`. Например, `--dpi 384` уменьшит в 4 раза.
+
+**Q: FreeRouting игнорирует зоны запрета.**
+A: Проверьте, что в `.dsn` есть две строки `(keepout ...)` — для F.Cu
+и для B.Cu. Скрипт добавляет их автоматически, но если зона была
+нарисована как открытый path, она не попадёт.
+
+**Q: Получаю ERROR «SMD-пад пересекается с отверстием».**
+A: Уберите SMD-пад в этой точке. THT-пад уже даёт медь на обеих
+сторонах, а via уже соединяет слои. Если это осознанный via-in-pad —
+используйте `--allow-via-in-pad`.
+
+**Q: FreeRouting plugin падает на моём файле. Что делать?**
+A: Проверьте, что используете режим `--via-mode pad` (это по умолчанию).
+Если запускаете без флага и всё равно падает — откройте `.kicad_pcb`
+в текстовом редакторе и убедитесь, что в файле нет строк, начинающихся
+с `(via `. Если есть — пересоберите через `--via-mode pad`.
+
+**Q: Как задать имя цепи?**
+A: В Inkscape: **Object → Object Properties → Label** → впишите `NetVCC`.
+Скрипт создаст цепь `VCC`.
+
+**Q: У меня пустой слой — это ошибка?**
+A: Нет. Скрипт напишет «отсутствует», продолжит работу.
+
+**Q: Как получить «настоящие» via, а не пады?**
+A: Запустите с `--via-mode via`. Учтите, что встроенный плагин
+FreeRouting в KiCad 10 на таких файлах падает — используйте
+standalone FreeRouting.
 
 ---
 
@@ -481,6 +588,7 @@ post-processing.
 - [Command Line Options](#command-line-options)
 - [Examples](#examples)
 - [Limitations](#limitations)
+- [Known Issues](#known-issues-en)
 - [FAQ](#faq-en)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
@@ -666,6 +774,16 @@ identical stroke color**: one on `F.Pad` and one on `B.Pad`.
 </g>
 ```
 
+**How vias are written to `.kicad_pcb`.** There are two output modes,
+selected with `--via-mode`:
+
+| Mode | What is written | Compatibility |
+|---|---|---|
+| `pad` (default) | via as a **THT pad** inside a dedicated footprint `svg:vias` | FreeRouting plugin (KiCad 10) |
+| `via` | canonical `(via ...)` object | Standalone FreeRouting only |
+
+See [Known Issues](#known-issues-en) for the background.
+
 ### Board Outline
 
 The `Edge.Cuts` layer converts all closed shapes (`path`, `rect`,
@@ -711,14 +829,17 @@ an inner triangle) are correctly parsed into separate contours.
 ## Output File Structure
 
 Outputs a `.kicad_pcb` file (format version `20231120`, compatible with
-KiCad 8 and 9+).
+KiCad 8+).
 
 Contains:
 
 * **One or two generated footprints** holding all pads:
   * `svg:converted-F` — F.Cu and THT pads;
   * `svg:converted-B` — B.Cu pads (only if present).
-* **Vias** — defined as standalone board elements.
+* **Vias**:
+  * with `--via-mode pad` — as THT pads inside a dedicated footprint
+    `svg:vias`;
+  * with `--via-mode via` — as standalone `(via ...)` objects.
 * **NPTH** — organized into a dedicated footprint `svg:holes`.
 * **Keepout Zones** — placed on F.Cu and/or B.Cu.
 * **Silkscreen** — rendered as `gr_line`, `gr_rect`, `gr_circle`,
@@ -807,6 +928,16 @@ python svg2kicad.py input.svg output.kicad_pcb [options]
         Scale DPI factor. Default is 96 (standard 96 px/inch).
         Higher value → smaller output board size.
 
+  --via-mode MODE
+        Vias output mode:
+          pad (default) — vias as THT pads inside a dedicated footprint
+              svg:vias. Works with the FreeRouting plugin (KiCad 10),
+              which crashes on pre-placed vias. Functionally identical
+              to a real via: copper on F.Cu and B.Cu + plated hole.
+          via — canonical (via ...) object. For standalone FreeRouting,
+              which handles pre-placed vias correctly. The KiCad 10
+              plugin will crash in this mode.
+
   --allow-via-in-pad
         Permit SMD pad overlap with vias (via-in-pad design).
         By default, overlaps trigger ERROR due to reflow wicking risks.
@@ -854,8 +985,8 @@ The MVP implementation explicitly **does not** support:
 * Non-Inkscape SVG formats (Adobe Illustrator, CorelDraw, DXF, HPGL,
   etc.).
 * Component placement with Reference Designators (`R1`, `U1`, etc.). All
-  pads map into a singular virtual footprint `#PWR01` (or `#PWR02`).
-  Assign real footprints inside KiCad after import.
+  pads map into virtual footprints `#PWR01`, `#PWR02`, etc. Assign real
+  footprints inside KiCad after import.
 * Multilayer stackups above 2 copper layers (4+ layers unsupported).
 * BGA footprints, automatic blind/buried vias, or unflagged
   via-in-pads.
@@ -865,6 +996,88 @@ The MVP implementation explicitly **does not** support:
   **Path → Object to Path**.
 
 These constraints ensure parsing stability and code maintainability.
+
+---
+
+<a name="known-issues-en"></a>
+## Known Issues
+
+### FreeRouting plugin (KiCad 10) crashes on pre-placed vias
+
+**Symptom:** the built-in **FreeRouting plugin** in KiCad 10 crashes
+during routing whenever the `.kicad_pcb` file contains at least one
+`(via ...)` object. Size, position, and layer do not matter — it crashes
+on any.
+
+**Cause:** a plugin bug. KiCad 10 exports pre-placed vias into the
+`wiring` section of the `.dsn` file, and FreeRouting cannot process it.
+Removing the via from `.kicad_pcb` eliminates the crash entirely.
+
+**Solution:** by default, the script (`--via-mode pad`) writes vias as
+**THT pads with no solder mask opening** inside a dedicated footprint
+`svg:vias`. Functionally identical to a real via: copper on F.Cu and
+B.Cu, plus a plated hole connecting the layers. The plugin sees this as
+a regular pin and routes it correctly.
+
+**To get "real" vias:** use `--via-mode via` — the script will write
+canonical `(via ...)` objects. This is intended for the
+**standalone FreeRouting** (Java app that reads `.dsn` directly). The
+KiCad 10 plugin will crash in this mode.
+
+**How this looks in KiCad:** in `pad` mode, vias appear as small round
+pads labeled `V1`, `V2`, etc. In `via` mode — as the standard via
+symbol. Manufacturing is unaffected either way.
+
+### Keepout zones and FreeRouting
+
+FreeRouting honors a keepout zone only when it is declared on **both**
+copper layers. The script automatically adds the zone to both F.Cu and
+B.Cu sections — no extra action needed.
+
+If after exporting DSN from KiCad the zone is not honored — check that
+the `.dsn` file contains both `(keepout "" (polygon F.Cu ...))` and
+`(keepout "" (polygon B.Cu ...))` lines.
+
+---
+
+<a name="faq-en"></a>
+## FAQ
+
+**Q: My letter "A" appears in KiCad as a solid triangle instead of a
+letter.**
+A: Make sure the text was converted to paths (**Path → Object to Path**).
+Also verify the color is exactly `#FFFFFF` — if it's `#f9f9f9`, the
+script treats it as a colored pad.
+
+**Q: The board came out too large.**
+A: Increase `--dpi`. For example, `--dpi 384` will shrink it by 4×.
+
+**Q: FreeRouting ignores my keepout zones.**
+A: Check that the `.dsn` file contains two `(keepout ...)` lines — one
+for F.Cu and one for B.Cu. The script adds both automatically, but if
+the zone was drawn as an open path, it won't be included.
+
+**Q: I get ERROR "SMD pad overlaps a hole".**
+A: Remove the SMD pad at that location. The THT pad already provides
+copper on both sides, and a via already connects the layers. If you
+deliberately need via-in-pad, use `--allow-via-in-pad`.
+
+**Q: The FreeRouting plugin crashes on my file. What to do?**
+A: Make sure you are using `--via-mode pad` (this is the default). If
+you run without the flag and it still crashes — open the `.kicad_pcb`
+in a text editor and verify there are no lines starting with `(via `.
+If there are, regenerate using `--via-mode pad`.
+
+**Q: How do I assign a net name?**
+A: In Inkscape: **Object → Object Properties → Label** → type `NetVCC`.
+The script will create a net named `VCC`.
+
+**Q: I have an empty layer — is that an error?**
+A: No. The script will report it as "absent" and continue.
+
+**Q: How do I get "real" vias instead of pads?**
+A: Run with `--via-mode via`. Note that the built-in FreeRouting plugin
+in KiCad 10 crashes on such files — use standalone FreeRouting instead.
 
 ---
 
