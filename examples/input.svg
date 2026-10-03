@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     width="100mm" height="100mm" viewBox="0 0 100 100">
+
+  <!-- ====================== EDGE CUTS ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="Edge.Cuts">
+    <rect id="edge1" x="5" y="5" width="90" height="90"
+          fill="none" stroke="#000000" stroke-width="0.1"/>
+  </g>
+
+  <!-- ====================== THT GROUPS ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="THT">
+    <!-- THT #1: без silk, без метки, красный -->
+    <g id="tht1">
+      <circle id="tht1_drill" cx="20" cy="20" r="0.4" fill="#000000"/>
+      <circle id="tht1_pad" cx="20" cy="20" r="1.5" fill="#ff0000"/>
+    </g>
+
+    <!-- THT #2: с silk, с меткой, зелёный -->
+    <g id="tht2">
+      <circle id="tht2_drill" cx="40" cy="20" r="0.4" fill="#000000"/>
+      <circle id="tht2_pad" cx="40" cy="20" r="1.5" fill="#00ff00"
+              inkscape:label="NetAnode"/>
+      <rect id="tht2_silk" x="36" y="16" width="8" height="1"
+            fill="#ffffff"/>
+    </g>
+
+    <!-- THT #3: только drill (NPTH) + silk -->
+    <g id="tht3">
+      <circle id="tht3_drill" cx="60" cy="20" r="1.0" fill="#000000"/>
+      <path id="tht3_silk"
+            d="M 58 17 L 62 17 L 62 18 L 58 18 Z"
+            fill="#ffffff"/>
+    </g>
+  </g>
+
+  <!-- ====================== F.PAD ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="F.Pad">
+    <!-- SMD F.Cu: прямоугольник -->
+    <rect id="smd_f1" x="15" y="35" width="6" height="4" fill="#0000ff"/>
+    <!-- SMD F.Cu: круг -->
+    <circle id="smd_f2" cx="35" cy="37" r="2" fill="#ffff00"/>
+    <!-- Via top -->
+    <circle id="via1_top" cx="55" cy="37" r="0.6"
+            fill="none" stroke="#ff00ff" stroke-width="0.15"/>
+  </g>
+
+  <!-- ====================== B.PAD ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="B.Pad">
+    <!-- SMD B.Cu: круг -->
+    <circle id="smd_b1" cx="35" cy="50" r="2" fill="#ffff00"/>
+    <!-- Via bottom -->
+    <circle id="via1_bot" cx="55" cy="37" r="0.6"
+            fill="none" stroke="#ff00ff" stroke-width="0.15"/>
+  </g>
+
+  <!-- ====================== DRILL ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="Drill">
+    <circle id="npth1" cx="20" cy="55" r="1.5" fill="#000000"/>
+    <circle id="npth2" cx="30" cy="55" r="1.5" fill="#000000"/>
+  </g>
+
+  <!-- ====================== F.SILK ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="F.SilkS">
+    <rect id="silk_f1" x="10" y="65" width="20" height="3"
+          fill="none" stroke="#ffffff" stroke-width="0.15"/>
+    <circle id="silk_f2" cx="45" cy="66" r="4"
+            fill="none" stroke="#ffffff" stroke-width="0.15"/>
+  </g>
+
+  <!-- ====================== B.SILK ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="B.SilkS">
+    <rect id="silk_b1" x="10" y="75" width="15" height="2"
+          fill="none" stroke="#ffffff" stroke-width="0.15"/>
+  </g>
+
+  <!-- ====================== RULES ====================== -->
+  <g inkscape:groupmode="layer" inkscape:label="F.Rule">
+    <rect id="frule1" x="55" y="65" width="25" height="20"
+          fill="none" stroke="#ff0000"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="B.Rule">
+    <rect id="brule1" x="55" y="65" width="25" height="20"
+          fill="none" stroke="#ff0000"/>
+  </g>
+
+</svg>
