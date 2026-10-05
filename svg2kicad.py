@@ -36,7 +36,7 @@ except ImportError:
     sys.exit(2)
 
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 DRILL_TOL_MM = 0.1
 RADIUS_TOL_MM = 0.001
@@ -50,12 +50,13 @@ L_BPAD  = "B.Pad"
 L_DRILL = "Drill"
 L_FSILK = "F.SilkS"
 L_BSILK = "B.SilkS"
+L_RULE  = "Rule"    # зона запрета сразу на F.Cu и B.Cu
 L_FRULE = "F.Rule"
 L_BRULE = "B.Rule"
 L_EDGE  = "Edge.Cuts"
 
 KNOWN_LAYERS = {L_THT, L_FPAD, L_BPAD, L_DRILL, L_FSILK, L_BSILK,
-                L_FRULE, L_BRULE, L_EDGE}
+                L_FRULE, L_BRULE, L_RULE, L_EDGE}
 
 INK_LABEL = "{http://www.inkscape.org/namespaces/inkscape}label"
 
@@ -1179,7 +1180,7 @@ def write_kicad_pcb(model, path, gnd_pour_pts=None, via_mode=VIA_MODE_PAD):
     w('\t(layers')
     LAYERS = [
         (0,  'F.Cu',       'signal', None),
-        (31, 'B.Cu',       'power',  None),
+        (31, 'B.Cu',       'signal',  None),
         (32, 'B.Adhes',    'user',   'B.Adhesive'),
         (33, 'F.Adhes',    'user',   'F.Adhesive'),
         (34, 'B.Paste',    'user',   None),
@@ -1419,8 +1420,11 @@ svg2kicad — конвертер Inkscape SVG в KiCad .kicad_pcb.
 
   Drill      Одиночные неметаллизированные отверстия (NPTH).
 
-  F.SilkS    Шелкография сверху.   F.Rule  — зона запрета на F.Cu.
-  B.SilkS    Шелкография снизу.    B.Rule  — зона запрета на B.Cu.
+  F.SilkS    Шелкография сверху.    B.SilkS    Шелкография снизу.    
+
+  Rule       Зона запрета сразу на F.Cu и B.Cu (обе стороны).
+  F.Rule  — зона запрета на F.Cu.   B.Rule  — зона запрета на B.Cu.
+  
   Edge.Cuts  Контур платы.
 
 ЦВЕТА В THT:
@@ -1490,8 +1494,11 @@ SVG LAYERS (inkscape:label):
 
   Drill      Standalone NPTH holes.
 
-  F.SilkS    Top silkscreen.      F.Rule  — keepout zone on F.Cu.
-  B.SilkS    Bottom silkscreen.   B.Rule  — keepout zone on B.Cu.
+  F.SilkS    Top silkscreen.    B.SilkS    Bottom silkscreen.   
+  
+  Rule: Keepout zone on both F.Cu and B.Cu (both sides).
+  F.Rule  — keepout zone on F.Cu.   B.Rule  — keepout zone on B.Cu.
+  
   Edge.Cuts  Board outline.
 
 COLORS IN THT:
@@ -1653,7 +1660,9 @@ def main():
         model.zones += parse_rules(layers[L_FRULE], dpi, "F.Cu")
     if L_BRULE in layers:
         model.zones += parse_rules(layers[L_BRULE], dpi, "B.Cu")
-    LOG.info(f"Rule Area: {len(model.zones)} зон")
+    if L_RULE in layers:
+        model.zones += parse_rules(layers[L_RULE], dpi, "F.Cu")
+        model.zones += parse_rules(layers[L_RULE], dpi, "B.Cu")
 
     if L_THT in layers:
         sandwich_groups = find_sandwiches(layers[L_THT])
