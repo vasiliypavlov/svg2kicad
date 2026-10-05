@@ -114,6 +114,7 @@ python svg2kicad.py input.svg output.kicad_pcb
 | `Drill` | Одиночные неметаллизированные отверстия (NPTH) |
 | `F.SilkS` | Шелкография сверху |
 | `B.SilkS` | Шелкография снизу |
+| `Rule` | Зона запрета сразу на F.Cu и B.Cu (обе стороны)  |
 | `F.Rule` | Зона запрета на F.Cu |
 | `B.Rule` | Зона запрета на B.Cu |
 | `Edge.Cuts` | Контур платы |
@@ -651,6 +652,7 @@ ignored (`WARN`) or file generation will fail (`ERROR`).
 | `Drill` | Standalone non-plated through-holes (NPTH) |
 | `F.SilkS` | Top silkscreen |
 | `B.SilkS` | Bottom silkscreen |
+| `Rule` | Keepout zone on both F.Cu and B.Cu (both sides) |
 | `F.Rule` | Keepout zone on F.Cu |
 | `B.Rule` | Keepout zone on B.Cu |
 | `Edge.Cuts` | Board outline |
