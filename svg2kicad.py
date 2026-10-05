@@ -213,12 +213,10 @@ def rect_corners(r, m):
     return [apply_pt(m, px, py) for px, py in pts]
 
 def rect_geom(r, m):
-    """Прямоугольник с учётом матрицы → (cx, cy, w, h, angle_deg).
+    """Прямоугольник с учётом матрицы → (cx, cy, w, h, angle_deg)."""
+    rw = abs(r.width)
+    rh = abs(r.height)
 
-    Возвращает реальные размеры сторон (без AABB-расширения),
-    центр после трансформации и угол поворота в градусах KiCad
-    (положительный — против часовой стрелки).
-    """
     cx0 = r.x + r.width / 2
     cy0 = r.y + r.height / 2
     cx, cy = apply_pt(m, cx0, cy0)
@@ -226,14 +224,14 @@ def rect_geom(r, m):
     scale_x = math.hypot(m.a, m.b)
     scale_y = math.hypot(m.c, m.d)
 
-    w = r.width * scale_x
-    h = r.height * scale_y
+    w = rw * scale_x
+    h = rh * scale_y
 
     # Направление верхнего ребра после трансформации.
+    # Используем положительные rw, чтобы не получить угол, перевёрнутый
+    # на 180° из-за отрицательной ширины после reify().
     p0 = apply_pt(m, r.x, r.y)
-    p1 = apply_pt(m, r.x + r.width, r.y)
-    # KiCad: положительный угол — против часовой стрелки.
-    # SVG: положительный — по часовой визуально. Значит, инвертируем.
+    p1 = apply_pt(m, r.x + rw, r.y)
     angle = -math.degrees(math.atan2(p1[1] - p0[1], p1[0] - p0[0]))
 
     return cx, cy, w, h, angle
