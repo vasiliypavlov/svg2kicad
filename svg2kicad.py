@@ -36,7 +36,7 @@ except ImportError:
     sys.exit(2)
 
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 DRILL_TOL_MM = 0.1
 RADIUS_TOL_MM = 0.001
@@ -212,6 +212,31 @@ def rect_corners(r, m):
     pts = [(x, y), (x+w, y), (x+w, y+h), (x, y+h)]
     return [apply_pt(m, px, py) for px, py in pts]
 
+def rect_geom(r, m):
+    """Прямоугольник с учётом матрицы → (cx, cy, w, h, angle_deg).
+
+    Возвращает реальные размеры сторон (без AABB-расширения),
+    центр после трансформации и угол поворота в градусах KiCad
+    (положительный — против часовой стрелки).
+    """
+    cx0 = r.x + r.width / 2
+    cy0 = r.y + r.height / 2
+    cx, cy = apply_pt(m, cx0, cy0)
+
+    scale_x = math.hypot(m.a, m.b)
+    scale_y = math.hypot(m.c, m.d)
+
+    w = r.width * scale_x
+    h = r.height * scale_y
+
+    # Направление верхнего ребра после трансформации.
+    p0 = apply_pt(m, r.x, r.y)
+    p1 = apply_pt(m, r.x + r.width, r.y)
+    # KiCad: положительный угол — против часовой стрелки.
+    # SVG: положительный — по часовой визуально. Значит, инвертируем.
+    angle = -math.degrees(math.atan2(p1[1] - p0[1], p1[0] - p0[0]))
+
+    return cx, cy, w, h, angle
 
 def path_to_polygons(path, m, samples=CURVE_SAMPLES):
     """Path → список полигонов (по одному на каждый subpath)."""
@@ -488,15 +513,15 @@ def parse_silk(group, dpi, layer_name, side):
                 'r': r * 25.4/dpi,
             })
         elif isinstance(shape, SvRect):
-            cs = rect_corners(shape, m)
-            xs = [c[0] for c in cs]; ys = [c[1] for c in cs]
+            cx, cy, w, h, angle = rect_geom(shape, m)
             shapes.append({
                 'id': el_id(shape), 'stroke_mm': stroke_w,
                 'layer': layer_str, 'kind': 'rect',
-                'x': min(xs) * 25.4/dpi,
-                'y': min(ys) * 25.4/dpi,
-                'w': (max(xs) - min(xs)) * 25.4/dpi,
-                'h': (max(ys) - min(ys)) * 25.4/dpi,
+                'x': cx * 25.4/dpi,
+                'y': cy * 25.4/dpi,
+                'w': w * 25.4/dpi,
+                'h': h * 25.4/dpi,
+                'angle': angle,
             })
         else:
             subpolys = shape_to_polygons(shape, m)
@@ -555,11 +580,11 @@ def _to_silk_geoms(shape, m, dpi):
         return [{'kind': 'circle',
                  'x': x*25.4/dpi, 'y': y*25.4/dpi, 'r': r*25.4/dpi}]
     if isinstance(shape, SvRect):
-        cs = rect_corners(shape, m)
-        xs = [c[0] for c in cs]; ys = [c[1] for c in cs]
+        cx, cy, w, h, angle = rect_geom(shape, m)
         return [{'kind': 'rect',
-                 'x0': min(xs)*25.4/dpi, 'y0': min(ys)*25.4/dpi,
-                 'x1': max(xs)*25.4/dpi, 'y1': max(ys)*25.4/dpi}]
+                 'x': cx*25.4/dpi, 'y': cy*25.4/dpi,
+                 'w': w*25.4/dpi, 'h': h*25.4/dpi,
+                 'angle': angle}]
 
     subpolys = shape_to_polygons(shape, m)
     result = []
@@ -578,6 +603,8 @@ def _geom_center(g):
     if g['kind'] == 'circle':
         return g['x'], g['y']
     if g['kind'] == 'rect':
+        if 'x' in g:
+            return g['x'], g['y']
         return (g['x0']+g['x1'])/2, (g['y0']+g['y1'])/2
     pts = g['points']
     xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
@@ -588,6 +615,8 @@ def _geom_size(g):
     if g['kind'] == 'circle':
         return 2*g['r'], 2*g['r']
     if g['kind'] == 'rect':
+        if 'w' in g:
+            return g['w'], g['h']
         return g['x1']-g['x0'], g['y1']-g['y0']
     pts = g['points']
     xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
@@ -732,8 +761,9 @@ def _sandwich_silk_to_model(s, model):
         info['x'], info['y'], info['r'] = s['x'], s['y'], s['r']
     elif s['kind'] == 'rect':
         info['kind'] = 'rect'
-        info['x'], info['y'] = s['x0'], s['y0']
-        info['w'], info['h'] = s['x1']-s['x0'], s['y1']-s['y0']
+        info['x'], info['y'] = s['x'], s['y']
+        info['w'], info['h'] = s['w'], s['h']
+        info['angle'] = s.get('angle', 0)
     elif s['kind'] == 'poly':
         info['kind'] = 'poly'
         pts = s['points']
@@ -802,14 +832,12 @@ def _parse_pad_layer(layer_group, dpi, model, side, layer_name):
                     'drill_dia': None, 'drill_geom': None,
                 })
             else:
-                cs = rect_corners(shape, m)
-                xs = [c[0] for c in cs]; ys = [c[1] for c in cs]
+                cx, cy, w, h, angle = rect_geom(shape, m)
                 model.pads.append({
                     'id': sid, 'side': side, 'kind': 'rect',
-                    'x': (min(xs)+max(xs))/2*25.4/dpi,
-                    'y': (min(ys)+max(ys))/2*25.4/dpi,
-                    'size_x': (max(xs)-min(xs))*25.4/dpi,
-                    'size_y': (max(ys)-min(ys))*25.4/dpi,
+                    'x': cx*25.4/dpi, 'y': cy*25.4/dpi,
+                    'size_x': w*25.4/dpi, 'size_y': h*25.4/dpi,
+                    'angle': angle,
                     'color': fill, 'label': el_label(shape),
                     'drill_dia': None, 'drill_geom': None,
                 })
@@ -1140,9 +1168,15 @@ def _write_pad(w, p, name):
         layers_str = '(layers "*.Cu" "*.Mask")'
 
     shape = 'circle' if p['kind'] == 'circle' else 'rect'
+    angle = p.get('angle', 0)
+    if abs(angle) > 1e-6:
+        at_str = f'(at {fmt(p["x"])} {fmt(p["y"])} {fmt(angle)})'
+    else:
+        at_str = f'(at {fmt(p["x"])} {fmt(p["y"])})'
+
     parts = [
         f'\t\t(pad "{name}" {ptype} {shape}',
-        f'(at {fmt(p["x"])} {fmt(p["y"])})',
+        at_str,
         f'(size {fmt(p["size_x"])} {fmt(p["size_y"])})',
     ]
     if drill_str:
@@ -1373,10 +1407,35 @@ def _write_silk(w, s):
           f'(stroke (width {fmt(sw)}) (type default)) (fill none) '
           f'(layer "{layer}") (uuid "{uid}"))')
     elif s['kind'] == 'rect':
-        w(f'\t(gr_rect (start {fmt(s["x"])} {fmt(s["y"])}) '
-          f'(end {fmt(s["x"]+s["w"])} {fmt(s["y"]+s["h"])}) '
-          f'(stroke (width {fmt(sw)}) (type default)) (fill none) '
-          f'(layer "{layer}") (uuid "{uid}"))')
+        cx, cy = s['x'], s['y']
+        rw, rh = s['w'], s['h']
+        angle = s.get('angle', 0)
+        if abs(angle) < 1e-6:
+            x0 = cx - rw/2
+            y0 = cy - rh/2
+            x1 = cx + rw/2
+            y1 = cy + rh/2
+            w(f'\t(gr_rect (start {fmt(x0)} {fmt(y0)}) '
+              f'(end {fmt(x1)} {fmt(y1)}) '
+              f'(stroke (width {fmt(sw)}) (type default)) (fill none) '
+              f'(layer "{layer}") (uuid "{uid}"))')
+        else:
+            rad = math.radians(angle)
+            cos_a, sin_a = math.cos(rad), math.sin(rad)
+            local = [(-rw/2, -rh/2), (rw/2, -rh/2),
+                     (rw/2, rh/2), (-rw/2, rh/2)]
+            pts = []
+            for lx, ly in local:
+                rx = lx*cos_a + ly*sin_a
+                ry = -lx*sin_a + ly*cos_a
+                pts.append((cx + rx, cy + ry))
+            w(f'\t(gr_poly')
+            w(f'\t\t(pts')
+            for x, y in pts:
+                w(f'\t\t\t(xy {fmt(x)} {fmt(y)})')
+            w(f'\t\t)')
+            w(f'\t\t(stroke (width {fmt(sw)}) (type default)) (fill none)')
+            w(f'\t\t(layer "{layer}") (uuid "{uid}"))')
     elif s['kind'] == 'poly':
         pts = s['points']
         if s.get('closed'):
